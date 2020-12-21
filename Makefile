@@ -1,2 +1,3 @@
 all:
-	- go run ./
+	#- go run ./
+	- go build && sudo ./fearlesshydro

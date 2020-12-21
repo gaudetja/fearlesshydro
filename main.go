@@ -2,8 +2,12 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/go-ble/ble"
+	"github.com/go-ble/ble/examples/lib/dev"
 )
 
 const (
@@ -14,7 +18,7 @@ const (
 	compensation = 273.15 // Kelvin to Celcius
 )
 const (
-	cycleTime = 1 * time.Second
+	cycleTime = 30 * time.Second
 	runTime   = 4 * cycleTime
 	debug     = false
 )
@@ -24,19 +28,27 @@ type Finish struct {
 	wg   *sync.WaitGroup
 }
 
+var device = "hci0"
+
 func main() {
 	var wg sync.WaitGroup
 	stop := make(chan bool, 0)
 	fan, _ := MakeFan()
 
+	device, err := dev.NewDevice(device)
+	if err != nil {
+		log.Fatalf("can't new device : %s", err)
+	}
+	ble.SetDefaultDevice(device)
+
 	doneRunning := time.After(runTime) // how the program normally ends
-	go Supervise(stop, &wg, fan)
+	go Supervise(stop, &wg, fan, device)
 	<-doneRunning
 	close(stop)
 	wg.Wait()
 }
 
-func Supervise(stop chan bool, wg *sync.WaitGroup, fan Fan) {
+func Supervise(stop chan bool, wg *sync.WaitGroup, fan Fan, device ble.Device) {
 	signals := make(chan bool)
 	wg.Add(1)
 	defer wg.Done() // LIFO; run this last
@@ -48,15 +60,15 @@ func Supervise(stop chan bool, wg *sync.WaitGroup, fan Fan) {
 			return
 			fmt.Printf("user quit\n")
 		case <-stop:
-			return
 			fmt.Printf("stahp\n")
+			return
 		case <-nextCycle:
 			nextCycle = time.After(cycleTime)
-			cycle(stop, wg, fan)
+			cycle(stop, wg, fan, device)
 
 			select {
 			case <-nextCycle:
-				panic(nil)
+				fmt.Printf("Cycle time shorter than cycle duration!\n")
 			default:
 				continue
 			}
@@ -64,9 +76,9 @@ func Supervise(stop chan bool, wg *sync.WaitGroup, fan Fan) {
 	}
 }
 
-func cycle(stop chan bool, wg *sync.WaitGroup, fan Fan) {
+func cycle(stop chan bool, wg *sync.WaitGroup, fan Fan, device ble.Device) {
 	airOut, err := GetOutsideAir()
-	airIn, err := GetInsideAir()
+	airIn, err := GetInsideAir(device)
 	if err != nil {
 		return
 	}
